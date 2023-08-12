@@ -1,0 +1,200 @@
+#!/bin/bash -e
+#
+# Install the basics to make the app run.
+# Example: bootstrap
+# Copyright (c) 2023 - Marti Adrogue <marti.adrogue@gmail.com>
+
+# Import common utilities
+# shellcheck disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+
+#######################################
+# CONSTANTS & VARIABLES
+#######################################
+
+# Script version
+readonly VERSION=1.0.0
+
+# List of required tools, example: REQUIRED_TOOLS=(git ssh)
+readonly REQUIRED_TOOLS=(awk ls cp sed)
+
+# Long Options. To expect an argument for an option, just place a : (colon)
+# after the proper option flag.
+readonly LONG_OPTS=(help version bootstrap:)
+
+# Short Options. To expect an argument for an option, just place a : (colon)
+# after the proper option flag.
+readonly SHORT_OPTS=hv
+
+# Script name
+readonly SCRIPT_NAME=${0##*/}
+
+
+#######################################
+# help command
+#######################################
+function help_command() {
+  cat <<END;
+
+USAGE:
+  $SCRIPT_NAME [options] <command>
+
+OPTIONS:
+  --verbose <level>       Override the default verbose for the command. Must
+                          be a standard logging update_snap_icons level: [debug, info,
+                          warning, error, fatal, none] (Default: [warning])
+  --help, -h              Alias help command
+  --version, -v           Alias version command
+  --                      Denotes the end of the options.  Arguments after this
+                          will be handled as parameters even if they start with
+                          a '-'.
+
+COMMANDS:
+  help                    Display detailed help
+  version                 Print version information.
+
+END
+  exit 1
+}
+
+#######################################
+# version command
+#######################################
+function version_command() {
+  echo "$SCRIPT_NAME version $VERSION"
+}
+
+#######################################
+# version command
+#######################################
+function update_system() {
+  echo "UPDATING SYSTEM ..."
+  apt-get update
+
+  echo "CUSTOMIZING PROMPT ..."
+  cp "$(dirname "${BASH_SOURCE[0]}")/raw/etc/motd" /etc/motd
+  cp "$(dirname "${BASH_SOURCE[0]}")/raw/home/vagrant/.bashrc" "/home/vagrant/.bashrc"
+
+  echo "INSTALLING LAMP ..."
+  apt-get install -y php8.1 apache2 mysql-server
+
+  echo "CONFIG LAMP ..."
+  apt-get install -y php8.1-fpm
+  mysql < "$(dirname "${BASH_SOURCE[0]}")/mysql_secure_installation.sql"
+
+  echo "INSTALLING COMPOSER DEPENDENCIES ..."
+  apt install -y zip php8.1-curl php8.1-xml php8.1-zip
+  php -m
+
+  echo "INSTALLING COMPOSER ..."
+  install_composer
+
+  echo "INSTALLING SYMFONY DEPENDENCIES ..."
+  apt install -y chromium-chromedriver
+  apt install -y php8.1-mysql php8.1-intl php8.1-mbstring
+  php --modules
+
+  echo "INSTALLING SYMFONY ..."
+  curl -sS https://get.symfony.com/cli/installer | bash
+  mv "$HOME/.symfony5/bin/symfony" /usr/local/bin/symfony
+  symfony check:requirements
+
+  echo "CREATING PROJECT ..."
+  mkdir -p /var/www/martiadrogue/
+  git config --global user.email "marti.adrogue@gmail.com"
+  git config --global user.name "Marti Adrogue"
+
+  date > /etc/vagrant_provisioned_at
+
+  exit 0
+}
+
+#######################################
+# default command
+#######################################
+function default_command() {
+  # set default command here
+  update_system
+}
+
+#######################################
+#
+# MAIN
+#
+#######################################
+function main() {
+  # Required tools
+  required "${REQUIRED_TOOLS[@]}"
+
+  # Parse options
+  while [[ $# -ge $OPTIND ]] && eval opt="echo \${$OPTIND}" || break
+    [[ $opt == -- ]] && shift && break
+      if [[ $opt == --?* ]]; then
+        opt=${opt#--}; shift
+
+        # Argument to option ?
+        OPTARG=;local has_arg=0
+        [[ $opt == *=* ]] && OPTARG=${opt#*=} && opt=${opt%="$OPTARG"} && has_arg=1
+
+        # Check if known option and if it has an argument if it must:
+        local state=0
+        for option in "${LONG_OPTS[@]}"; do
+          [[ "$option" == "$opt" ]] && state=1 && break
+          [[ "${option%:}" == "$opt" ]] && state=2 && break
+        done
+        # Param not found
+        [[ $state = 0 ]] && OPTARG=$opt && opt='?'
+        # Param with no args, has args
+        [[ $state = 1 && $has_arg = 1 ]] && OPTARG=$opt && opt=::
+        # Param with args, has no args
+        if [[ $state = 2 && $has_arg = 0 ]]; then
+          [[ $# -ge $OPTIND ]] && eval OPTARG="echo \${$OPTIND}" && shift || { OPTARG=$opt; opt=:; }
+        fi
+
+        # for the while
+        true
+      else
+        getopts ":$SHORT_OPTS" opt
+      fi
+  do
+    case "$opt" in
+      # List of options
+      v|version)    version_command; exit 0; ;;
+      h|help)       help_command ;;
+      update_snap_icons)    update_snap_icons "$OPTARG" ;;
+      # Errors
+      ::)	err "Unexpected argument to option '$OPTARG'"; exit 2; ;;
+      :)	err "Missing argument to option '$OPTARG'"; exit 2; ;;
+      \?)	err "Unknown option '$OPTARG'"; exit 2; ;;
+      *)	err "Internal script error, unmatched option '$opt'"; exit 2; ;;
+    esac
+  done
+  shift $((OPTIND-1))
+
+  # No more arguments -> call default command
+  [[ -z "$1" ]] && default_command
+
+  # Set command and arguments
+  command="$1" && shift
+  # Uncoment this variable if you want to use it
+  # args=( "$@" )
+
+  # Execute the command
+  case "$command" in
+    # help
+    help)     help_command ;;
+
+    # version
+    version)  version_command ;;
+
+    # test
+    test)     update_icons ;;
+
+    # Unknown command
+    *)        err "Unknown command '$command'"; exit 2; ;;
+  esac
+}
+#######################################
+# Run the script
+#######################################
+main "$@"
