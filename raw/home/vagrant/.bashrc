@@ -120,6 +120,6 @@ fi
 printf '\n%s\n' "Running services:"
 service --status-all | grep '+'
 
-if [ -f /var/www/martiadrogue/housesniffer ]; then
+if [ -e /var/www/martiadrogue/housesniffer ]; then
     cd /var/www/martiadrogue/housesniffer || exit
 fi
